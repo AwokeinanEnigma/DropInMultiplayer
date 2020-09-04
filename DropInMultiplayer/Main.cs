@@ -6,6 +6,7 @@ using RoR2;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -29,16 +30,16 @@ namespace DropInMultiplayer
         public static event Action start;
         #endregion
         #region Config
-        private static ConfigEntry<bool> ImmediateSpawn { get; set; }
-        private static ConfigEntry<bool> NormalSurvivorsOnly { get; set; }
-        private static ConfigEntry<bool> AllowSpawnAsWhileAlive { get; set; }
-        private static ConfigEntry<bool> StartWithItems { get; set; }
-        public static ConfigEntry<bool> SpawnAsEnabled { get; set; }
-        public static ConfigEntry<bool> HostOnlySpawnAs { get; set; }
-        public static ConfigEntry<bool> GiveLunarItems { get; set; }
-        public static ConfigEntry<bool> GiveRedItems { get; set; }
-        public static ConfigEntry<bool> WelcomeMessage { get; set; }
-        public static ConfigEntry<bool> GiveExactItems { get; set; }
+        private ConfigEntry<bool> ImmediateSpawn { get; set; }
+        private ConfigEntry<bool> NormalSurvivorsOnly { get; set; }
+        private ConfigEntry<bool> AllowSpawnAsWhileAlive { get; set; }
+        private ConfigEntry<bool> StartWithItems { get; set; }
+        public ConfigEntry<bool> SpawnAsEnabled { get; set; }
+        public ConfigEntry<bool> HostOnlySpawnAs { get; set; }
+        public ConfigEntry<bool> GiveLunarItems { get; set; }
+        public ConfigEntry<bool> GiveRedItems { get; set; }
+        public ConfigEntry<bool> WelcomeMessage { get; set; }
+        public ConfigEntry<bool> GiveExactItems { get; set; }
         #endregion
         #region Instance and logger
         public static DropInMultiplayer instance;
@@ -250,6 +251,87 @@ namespace DropInMultiplayer
         private void GiveItems(On.RoR2.Run.orig_SetupUserCharacterMaster orig, Run self, NetworkUser user)
         {
             orig(self, user);
+
+            if (!StartWithItems.Value || !Run.instance ||Run.instance.fixedTime < 5f )
+            {
+                return;
+            }
+
+            //the way i did this is confusing so i'm just gonna explain these int names
+            /*
+            averageItemCountT1 = average item count tier 1 
+            averageItemCountT2 = average item count tier 2 
+            averageItemCountT3 = average item count tier 3
+            averageItemCountTL = average item count tier lunar
+            averageItemCountTB = average item count tier boss
+            */
+            int averageItemCountT1 = 0;
+            int averageItemCountT2 = 0;
+            int averageItemCountT3 = 0;
+            int averageItemCountTL = 0;
+            // int averageItemCountTB = 0;
+
+            ReadOnlyCollection<NetworkUser> readOnlyInstancesList = NetworkUser.readOnlyInstancesList;
+
+            int playerCount = PlayerCharacterMasterController.instances.Count;
+            if (playerCount <= 1)
+                return;
+            else
+                playerCount--;
+
+            for (int i = 0; i < readOnlyInstancesList.Count; i++)
+            {
+                if (readOnlyInstancesList[i].id.Equals(user.id))
+                    continue;
+                CharacterMaster cm = readOnlyInstancesList[i].master;
+                averageItemCountT1 += cm.inventory.GetTotalItemCountOfTier(ItemTier.Tier1);
+                averageItemCountT2 += cm.inventory.GetTotalItemCountOfTier(ItemTier.Tier2);
+                averageItemCountT3 += cm.inventory.GetTotalItemCountOfTier(ItemTier.Tier3);
+                averageItemCountTL += cm.inventory.GetTotalItemCountOfTier(ItemTier.Lunar);
+                // averageItemCountTB += cm.inventory.GetTotalItemCountOfTier(ItemTier.Boss);
+            }
+
+            averageItemCountT1 /= playerCount;
+            averageItemCountT2 /= playerCount;
+            averageItemCountT3 /= playerCount;
+            averageItemCountTL /= playerCount;
+            // averageItemCountTB /= playerCount;
+
+            CharacterMaster characterMaster = user.master;
+
+            int itemCountT1 = averageItemCountT1 - characterMaster.inventory.GetTotalItemCountOfTier(ItemTier.Tier1);
+            int itemCountT2 = averageItemCountT2 - characterMaster.inventory.GetTotalItemCountOfTier(ItemTier.Tier2);
+            int itemCountT3 = averageItemCountT3 - characterMaster.inventory.GetTotalItemCountOfTier(ItemTier.Tier3);
+            int itemCountTL = averageItemCountTL - characterMaster.inventory.GetTotalItemCountOfTier(ItemTier.Lunar);
+
+            itemCountT1 = itemCountT1 < 0 ? 0 : itemCountT1;
+            itemCountT2 = itemCountT2 < 0 ? 0 : itemCountT2;
+            itemCountT3 = itemCountT3 < 0 ? 0 : itemCountT3;
+            itemCountTL = itemCountTL < 0 ? 0 : itemCountTL;
+
+
+            for (int i = 0; i < itemCountT1; i++)
+            {
+                characterMaster.inventory.GiveItem(GetRandomItem(ItemCatalog.tier1ItemList), 1);
+            }
+            for (int i = 0; i < itemCountT2; i++)
+            {
+                characterMaster.inventory.GiveItem(GetRandomItem(ItemCatalog.tier2ItemList), 1);
+            }
+            if (GiveRedItems.Value)
+            {
+                for (int i = 0; i < itemCountT3; i++)
+                {
+                    characterMaster.inventory.GiveItem(GetRandomItem(ItemCatalog.tier3ItemList), 1);
+                }
+            }
+            if (GiveLunarItems.Value)
+            {
+                for (int i = 0; i < itemCountTL; i++)
+                {
+                    characterMaster.inventory.GiveItem(GetRandomItem(ItemCatalog.lunarItemList), 1);
+                }
+            }
         }
 
         private void FirstFrame() {
@@ -264,6 +346,9 @@ namespace DropInMultiplayer
                 }
             }
         }
+        #endregion
+        #region
+
         #endregion
         #region Methods
         private void JoinAs(NetworkUser user, string bodyString, string userString) {
